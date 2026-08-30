@@ -13,12 +13,15 @@ Open an [issue](https://github.com/cmiic/media-screener-api/issues/new/choose) u
 ## Development
 
 ```bash
-uv sync
-uv run ruff check .
-uv run pytest
+uv lock --check                                        # the lockfile is up to date
+uv run --locked --only-dev ruff check .                # lint
+uv run --locked --group dev python -m pytest tests     # unit tests
+markdownlint-cli2                                      # docs
 ```
 
-`ruff` and the markdown linter run in CI.
+These are exactly the commands CI runs. `--locked` makes `uv` fail rather than
+silently re-resolve the lockfile, so a local run uses the same dependency set
+that CI validates.
 
 ## Making a change
 
