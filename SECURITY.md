@@ -6,7 +6,7 @@ Please report security issues **privately** using GitHub's [private vulnerabilit
 
 If you cannot use GitHub advisories, email <c@miic.at>.
 
-Please include the affected version or image digest, a description of the impact, and the smallest reproduction you can manage. You will get an acknowledgement, and a fix or an explanation of why the behaviour is intended. This is a small project maintained by one person, so please allow reasonable time before disclosing publicly.
+Please include the affected version or image digest, a description of the impact, and the smallest reproduction you can manage. You will get an acknowledgement, and a fix or an explanation of why the behavior is intended. This is a small project maintained by one person, so please allow reasonable time before disclosing publicly.
 
 ## Supported versions
 

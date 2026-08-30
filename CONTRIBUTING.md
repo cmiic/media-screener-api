@@ -4,7 +4,7 @@ Thanks for taking the time to contribute. This document covers how to get the pr
 
 ## Code of Conduct
 
-This project is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By participating you are expected to uphold it. Report unacceptable behaviour to <c@miic.at>.
+This project is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By participating you are expected to uphold it. Report unacceptable behavior to <c@miic.at>.
 
 ## Reporting bugs and requesting features
 
@@ -25,7 +25,7 @@ uv run pytest
 `main` is protected. All changes go through a pull request:
 
 1. Branch from `main`.
-2. Make the change, with tests where behaviour changes.
+2. Make the change, with tests where behavior changes.
 3. Open a pull request describing what changed and why.
 4. CI must be green — the required checks are **Lint, Test**.
 5. Your branch must be up to date with `main` before merging. Because required checks are strict, merging one pull request puts the others behind; use the "Update branch" button to bring yours forward.
@@ -47,4 +47,4 @@ Explain *why* in the body when the reason is not obvious from the diff.
 
 ## Licensing of contributions
 
-By contributing, you agree that your contributions are licensed under the GNU Affero General Public License v3.0 or later, the same licence as this project. See [LICENSE](LICENSE).
+By contributing, you agree that your contributions are licensed under the GNU Affero General Public License v3.0 or later, the same license as this project. See [LICENSE](LICENSE).
