@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.7"
+          enable-cache: true
+
+      - name: Check uv lockfile
+        run: uv lock --check
+
+      - name: Run ruff
+        run: uv run --locked --only-dev ruff check .
+
+      - name: Run unit tests
+        run: uv run --locked --group dev python -m pytest tests
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+      - name: Install markdownlint
+        run: npm install -g markdownlint-cli2
+
+      - name: Run markdownlint
+        run: markdownlint-cli2
+
+  test:
+    name: Test
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build Docker image
+        run: docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" -t media-screener-api .
+
+      - name: Read model metadata
+        id: model
+        run: |
+          source model.env
+          echo "sha256=$MODEL_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Cache model
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ runner.temp }}/640m.onnx
+          key: nudenet-640m-${{ steps.model.outputs.sha256 }}
+
+      - name: Provision model
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./scripts/provision-model.sh "$RUNNER_TEMP/640m.onnx"
+
+      - name: Start container
+        run: |
+          docker run -d --name media-screener-test -p 8080:8080 \
+            --volume "$RUNNER_TEMP/640m.onnx:/models/640m.onnx:ro" \
+            media-screener-api
+          docker ps
+
+      - name: Wait for container health
+        run: |
+          set -euo pipefail
+
+          for _ in {1..30}; do
+            if ! docker ps --format '{{.Names}}' | grep -qx media-screener-test; then
+              echo "Container exited unexpectedly" >&2
+              docker logs media-screener-test >&2 || true
+              exit 1
+            fi
+
+            state=$(docker inspect -f '{{.State.Health.Status}}' media-screener-test)
+            if [[ "$state" == "healthy" ]]; then
+              exit 0
+            fi
+
+            if [[ "$state" == "unhealthy" ]]; then
+              echo "Container became unhealthy" >&2
+              docker inspect -f '{{json .State.Health}}' media-screener-test >&2 || true
+              docker logs --tail 100 media-screener-test >&2 || true
+              exit 1
+            fi
+
+            sleep 2
+          done
+
+          echo "Timed out waiting for container health" >&2
+          docker inspect -f '{{json .State.Health}}' media-screener-test >&2 || true
+          docker logs --tail 100 media-screener-test >&2 || true
+          exit 1
+
+      - name: Health check
+        run: curl -fsS http://localhost:8080/health
+
+      - name: Test inference endpoint
+        run: |
+          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==" | base64 -d > test.png
+          response=$(curl -s -F file=@test.png http://localhost:8080/infer)
+          echo "Infer response: $response"
+          echo "$response" | grep -q "prediction" || exit 1
+
+      - name: Test classify endpoint
+        run: |
+          response=$(curl -s -F file=@test.png http://localhost:8080/classify)
+          echo "Classify response: $response"
+          echo "$response" | grep -q "unsafe" || exit 1
+
+      - name: Stop container
+        if: always()
+        run: docker stop media-screener-test || true

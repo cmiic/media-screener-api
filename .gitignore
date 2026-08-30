@@ -1,0 +1,37 @@
+# Test files (may contain sensitive images)
+.testfiles/*
+!.testfiles/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Environment files (contain local config)
+deploy/.env
+
+# Model files are provisioned separately and mounted read-only at runtime
+*.onnx
+
+tmp/

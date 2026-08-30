@@ -1,0 +1,11 @@
+.git
+.github
+.ruff_cache
+.testfiles
+.venv
+__pycache__
+*.log
+*.onnx
+*.py[cod]
+deploy/.env
+tmp

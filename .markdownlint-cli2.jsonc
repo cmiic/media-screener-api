@@ -1,0 +1,10 @@
+{
+  "config": {
+    "extends": ".markdownlint.json"
+  },
+  "globs": ["**/*.md"],
+  "ignores": [
+    "__pycache__",
+    ".venv"
+  ]
+}
