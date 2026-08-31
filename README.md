@@ -273,8 +273,8 @@ The `deploy/run.sh` script applies:
 - The standalone scripts bind the host port to loopback (`127.0.0.1`) by default. The container listens on all container interfaces so published-port routing continues to work.
 - The service has no built-in authentication. Keep same-host and Compose traffic on a private network.
 - Before any cross-host deployment, require TLS plus service authentication at a reverse proxy or gateway; prefer mutually authenticated TLS for service-to-service traffic and apply rate limits there.
-- Upload, parser, concurrency, and timeout limits are defense-in-depth controls and should remain below the upstream File API and proxy limits.
-- The default queue, upload, and processing deadlines total 55 seconds, below the File API production client's 60-second scanner timeout.
+- Upload, parser, concurrency, and timeout limits are defense-in-depth controls and should remain below the calling client's and any proxy's limits.
+- The default queue, upload, and processing deadlines total 55 seconds. Whatever calls this service must allow at least that long, or it will give up while classification is still running and the worker slot stays held until the underlying work stops.
 
 ---
 
