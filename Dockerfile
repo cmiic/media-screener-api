@@ -1,4 +1,8 @@
-FROM python:3.14-slim
+# uv comes in as a stage because Dependabot only updates FROM lines, not
+# COPY --from=<image>.
+FROM ghcr.io/astral-sh/uv:0.11.7@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a AS uv
+
+FROM python:3.14.8-slim-trixie@sha256:89fb7d3da20043c370643435258bdd7ab755d326d359001d02988ed15ae5219e
 
 ARG SOURCE_REVISION=""
 
@@ -8,7 +12,7 @@ LABEL org.opencontainers.image.source="https://github.com/cmiic/media-screener-a
 
 WORKDIR /app
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 ENV PATH="/app/.venv/bin:$PATH" \
     MODEL_PATH="/models/640m.onnx" \
     SOURCE_REVISION="$SOURCE_REVISION" \
