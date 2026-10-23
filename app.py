@@ -68,11 +68,11 @@ SCAN_QUEUE_TIMEOUT_SECONDS = float(os.environ.get("SCAN_QUEUE_TIMEOUT_SECONDS", 
 UPLOAD_TIMEOUT_SECONDS = float(os.environ.get("UPLOAD_TIMEOUT_SECONDS", "10"))
 PROCESSING_TIMEOUT_SECONDS = float(os.environ.get("PROCESSING_TIMEOUT_SECONDS", "40"))
 
-# The errors /infer and /classify can answer with, for the OpenAPI schema; the
-# 4xx and the 504 carry their message in "detail". 422 stays FastAPI's own,
-# for invalid parameters: a file over a media limit answers 422 as well, which
-# the route descriptions say, but declaring 422 here would replace FastAPI's
-# validation error schema rather than add to it.
+# The error responses of /infer and /classify, as the OpenAPI schema lists
+# them. The 4xx and the 504 carry their message in "detail". 422 stays
+# FastAPI's own, for invalid parameters: a file over a media limit answers 422
+# as well, which the route descriptions say, but declaring 422 here would
+# replace FastAPI's validation error schema rather than add to it.
 PROCESSING_ERRORS = {
     408: {"description": "The upload did not arrive within UPLOAD_TIMEOUT_SECONDS"},
     413: {"description": "The file exceeds MAX_UPLOAD_SIZE"},
