@@ -47,7 +47,7 @@ jobs:
           TAG: ${{ steps.release_tag.outputs.tag }}
         run: |
           set -euo pipefail
-          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "${IMAGE_NAME}:${TAG}" .
+          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" --build-arg APP_VERSION="${TAG#v}" -t "${IMAGE_NAME}:${TAG}" .
           docker push "${IMAGE_NAME}:${TAG}"
 
       - name: Create GitHub release

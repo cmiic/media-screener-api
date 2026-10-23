@@ -40,6 +40,13 @@ COPY LICENSE /app/LICENSE
 COPY model.env /app/model.env
 COPY --chmod=755 scripts/container-entrypoint.sh /app/scripts/container-entrypoint.sh
 
+# Set by the release workflow from the git tag (without its leading "v"); local
+# and CI builds keep "dev". Declared after the dependency and license layers so
+# a new version does not invalidate their cache.
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+LABEL org.opencontainers.image.version="${APP_VERSION}"
+
 EXPOSE 8080
 
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=12 \

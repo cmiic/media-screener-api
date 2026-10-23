@@ -1,5 +1,7 @@
 [project]
 name = "media-screener-api"
+# Required by the project table but unused: the project is never built or
+# installed, and releases are versioned by git tag (APP_VERSION in Dockerfile).
 version = "0.1.0"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.14,<3.15"
