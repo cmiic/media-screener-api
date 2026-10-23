@@ -18,6 +18,8 @@ jobs:
       SITE_DIR: tmp/docs-site
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # tags, for git describe below
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -50,7 +52,12 @@ jobs:
 
       - name: Build and start container
         run: |
-          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" -t media-screener-api .
+          # The published docs describe the commit they were built from: the bare
+          # version on a release commit, e.g. 1.0.0-12-gabc1234 past one.
+          APP_VERSION="$(git describe --tags --match 'v*' 2>/dev/null || echo dev)"
+          APP_VERSION="${APP_VERSION#v}"
+          echo "Documenting version ${APP_VERSION}"
+          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" --build-arg APP_VERSION="$APP_VERSION" -t media-screener-api .
           docker run -d --name media-screener-docs -p 8080:8080 \
             --volume "$RUNNER_TEMP/640m.onnx:/models/640m.onnx:ro" \
             media-screener-api

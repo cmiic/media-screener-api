@@ -24,8 +24,15 @@ def source_url(revision: str) -> str:
 
 SOURCE_URL = source_url(os.environ.get("SOURCE_REVISION", ""))
 
+# The release tag is the only version this service has. The release workflow
+# passes it into the image build as APP_VERSION; the project is not installed as
+# a package (tool.uv.package = false), so there is no package metadata to read
+# it from instead. Anything not built from a release tag reports "dev".
+APP_VERSION = os.environ.get("APP_VERSION", "dev")
+
 app = FastAPI(
     title="Media Screener API",
+    version=APP_VERSION,
     description=f"Licensed under AGPL-3.0-or-later. [Source code]({SOURCE_URL})",
     license_info={
         "name": "GNU Affero General Public License v3.0 or later",
