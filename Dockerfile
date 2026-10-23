@@ -21,9 +21,9 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 # Install dependencies for opencv and curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
     libgl1 \
     libglib2.0-0 \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

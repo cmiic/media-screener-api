@@ -6,8 +6,8 @@ THRESHOLD="${THRESHOLD:-0.35}"
 TEST_DIR=".testfiles"
 
 # Check if test directory exists and has files
-if [ ! -d "$TEST_DIR" ]; then
-    echo "Error: $TEST_DIR directory not found"
+if [[ ! -d "$TEST_DIR" ]]; then
+    echo "Error: $TEST_DIR directory not found" >&2
     exit 1
 fi
 
@@ -17,7 +17,7 @@ EXTENSIONS="jpg|jpeg|png|webp|gif|bmp|mp4|webm|avi|mov|mkv|pdf|docx|pptx"
 # Count supported files
 FILE_COUNT=$(find "$TEST_DIR" -type f -regextype posix-extended -iregex ".*\.($EXTENSIONS)$" 2>/dev/null | wc -l)
 
-if [ "$FILE_COUNT" -eq 0 ]; then
+if [[ "$FILE_COUNT" -eq 0 ]]; then
     echo "No supported files found in $TEST_DIR"
     echo "Supported: images (jpg, png, webp, gif, bmp), videos (mp4, webm, avi, mov, mkv), pdf, docx, pptx"
     exit 0
@@ -39,11 +39,11 @@ for file in "$TEST_DIR"/*; do
 
     filename=$(basename "$file")
     
-    # Call the classify endpoint
-    response=$(curl -s -F "file=@$file" "$API_URL/classify?threshold=$THRESHOLD" 2>&1)
-    
-    if [ $? -ne 0 ]; then
-        echo "[$filename] ERROR: Failed to connect"
+    # Call the classify endpoint. An error answer (too large, over a media
+    # limit, at capacity, timed out) fails like a lost connection does, and
+    # keeps its body for the message.
+    if ! response=$(curl -sS --fail-with-body -F "file=@$file" "$API_URL/classify?threshold=$THRESHOLD" 2>&1); then
+        echo "[$filename] ERROR: ${response//$'\n'/ }" >&2
         ((ERROR_COUNT++))
         continue
     fi
@@ -53,12 +53,15 @@ for file in "$TEST_DIR"/*; do
     confidence=$(echo "$response" | grep -o '"confidence":[^,]*' | cut -d':' -f2)
     classes=$(echo "$response" | grep -o '"detected_classes":\[[^]]*\]' | sed 's/"detected_classes"://')
 
-    if [ "$unsafe" = "true" ]; then
+    if [[ "$unsafe" == "true" ]]; then
         echo "[$filename] UNSAFE (confidence: $confidence) $classes"
         ((UNSAFE_COUNT++))
-    else
+    elif [[ "$unsafe" == "false" ]]; then
         echo "[$filename] SAFE"
         ((SAFE_COUNT++))
+    else
+        echo "[$filename] ERROR: no verdict in $response" >&2
+        ((ERROR_COUNT++))
     fi
 done
 
