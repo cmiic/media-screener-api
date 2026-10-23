@@ -6,6 +6,7 @@ import tempfile
 import threading
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from typing import Annotated
 
 import cv2
 import pypdfium2 as pdfium
@@ -66,6 +67,19 @@ MAX_CONCURRENT_SCANS = int(os.environ.get("MAX_CONCURRENT_SCANS", "1"))
 SCAN_QUEUE_TIMEOUT_SECONDS = float(os.environ.get("SCAN_QUEUE_TIMEOUT_SECONDS", "5"))
 UPLOAD_TIMEOUT_SECONDS = float(os.environ.get("UPLOAD_TIMEOUT_SECONDS", "10"))
 PROCESSING_TIMEOUT_SECONDS = float(os.environ.get("PROCESSING_TIMEOUT_SECONDS", "40"))
+
+# The errors /infer and /classify can answer with, for the OpenAPI schema; the
+# 4xx and the 504 carry their message in "detail". 422 stays FastAPI's own,
+# for invalid parameters: a file over a media limit answers 422 as well, which
+# the route descriptions say, but declaring 422 here would replace FastAPI's
+# validation error schema rather than add to it.
+PROCESSING_ERRORS = {
+    408: {"description": "The upload did not arrive within UPLOAD_TIMEOUT_SECONDS"},
+    413: {"description": "The file exceeds MAX_UPLOAD_SIZE"},
+    500: {"description": "The file could not be processed, for example because it cannot be decoded"},
+    503: {"description": "No processing slot freed up within SCAN_QUEUE_TIMEOUT_SECONDS"},
+    504: {"description": "Processing did not finish within PROCESSING_TIMEOUT_SECONDS"},
+}
 
 pdfium_lock = threading.Lock()
 scan_slots = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
@@ -356,12 +370,16 @@ def infer_contents(contents: bytes, content_type: str, filename: str, sample_int
     return {"error": f"Unsupported file type: {content_type}", "filename": filename}
 
 
-@app.post("/infer")
+@app.post("/infer", responses=PROCESSING_ERRORS)
 async def infer(
-    file: UploadFile = File(...),
-    sample_interval: float = Query(5.0, ge=0.1, le=60, description="Seconds between video frame samples"),
+    file: Annotated[UploadFile, File()],
+    sample_interval: Annotated[float, Query(ge=0.1, le=60, description="Seconds between video frame samples")] = 5.0,
 ):
-    """Detect nudity in an uploaded file (image, video, PDF, DOCX, PPTX)."""
+    """Detect nudity in an uploaded file (image, video, PDF, DOCX, PPTX).
+
+    A file over a media limit (PDF pages or rendered pixels, video duration or
+    sampled frames, document images) is rejected with 422.
+    """
     return await process_upload(file, infer_contents, file.content_type or "", file.filename or "", sample_interval)
 
 
@@ -444,14 +462,18 @@ def classify_contents(
     return {"error": f"Unsupported file type: {content_type}", "filename": filename}
 
 
-@app.post("/classify")
+@app.post("/classify", responses=PROCESSING_ERRORS)
 async def classify(
-    file: UploadFile = File(...),
-    threshold: float = Query(0.35, ge=0, le=1, description="Minimum confidence for unsafe detection"),
-    sample_interval: float = Query(5.0, ge=0.1, le=60, description="Seconds between video frame samples"),
-    early_exit: bool = Query(True, description="Stop on first unsafe detection"),
+    file: Annotated[UploadFile, File()],
+    threshold: Annotated[float, Query(ge=0, le=1, description="Minimum confidence for unsafe detection")] = 0.35,
+    sample_interval: Annotated[float, Query(ge=0.1, le=60, description="Seconds between video frame samples")] = 5.0,
+    early_exit: Annotated[bool, Query(description="Stop on first unsafe detection")] = True,
 ):
-    """Classify file as safe or unsafe (image, video, PDF, DOCX, PPTX)."""
+    """Classify file as safe or unsafe (image, video, PDF, DOCX, PPTX).
+
+    A file over a media limit (PDF pages or rendered pixels, video duration or
+    sampled frames, document images) is rejected with 422.
+    """
     return await process_upload(
         file,
         classify_contents,
