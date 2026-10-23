@@ -114,6 +114,9 @@ jobs:
       - name: Health check
         run: curl -fsS http://localhost:8080/health
 
+      - name: Verify the API runs as non-root
+        run: docker exec media-screener-test sh -c 'test "$(id -u)" -ne 0'
+
       - name: Test inference endpoint
         run: |
           echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==" | base64 -d > test.png
