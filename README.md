@@ -311,7 +311,7 @@ NudeNet's `v3` source tree contains the AGPL-3.0 license, although its `setup.py
 
 PDF page rendering uses the Apache-2.0/BSD-3-Clause licensed `pypdfium2` wrapper and BSD-style licensed PDFium. Binary distributions must retain the license notices shipped with these dependencies.
 
-Every application image collects the exact installed Python dependency licenses and a versioned notice manifest under `/app/THIRD_PARTY_LICENSES`; package-native copies also remain under `/app/.venv/lib/python3.14/site-packages/`.
+Every application image collects the exact installed Python dependency licenses and a versioned notice manifest under `/app/THIRD_PARTY_LICENSES`; package-native copies also remain under `/app/.venv/lib/python3.14/site-packages/`. Each GitHub release also attaches an SPDX SBOM of the image, generated from the published image digest, and states where Debian's Corresponding Source for every Debian package in it is available at those exact versions.
 
 ### Model
 
