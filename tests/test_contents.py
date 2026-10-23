@@ -197,3 +197,10 @@ def test_infer_unsupported_type() -> None:
         response = app.infer_contents(b"zip", "application/zip", "archive.zip", 5.0)
 
     assert response == {"error": "Unsupported file type: application/zip", "filename": "archive.zip"}
+
+
+def test_classify_lists_each_class_once_in_first_seen_order() -> None:
+    with extracted("pdf", PDF_PAGES):
+        response = app.classify_contents(b"upload", CONTENT_TYPES["pdf"], "upload", 0.35, 5.0, False)
+
+    assert response["detected_classes"] == ["FEMALE_BREAST_EXPOSED", "BUTTOCKS_EXPOSED", "MALE_GENITALIA_EXPOSED"]

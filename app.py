@@ -4,7 +4,7 @@ import math
 import os
 import tempfile
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 
 import cv2
@@ -317,52 +317,43 @@ def classify_image(image_bytes: bytes, threshold: float) -> dict:
     }
 
 
+def extract_document_images(file_type: str, contents: bytes) -> list[tuple[bytes, str]]:
+    """Extract the embedded images of a DOCX or a PPTX."""
+    return extract_docx_images(contents) if file_type == "docx" else extract_pptx_images(contents)
+
+
+def detect_items(items: Iterable[tuple[bytes, object]], location_key: str) -> list[dict]:
+    """Run the detector on each item; keep those with any detection, labelled with their location."""
+    predictions = []
+    for image_bytes, location in items:
+        detections = detector.detect(image_bytes)
+        if detections:
+            predictions.append({location_key: location, "detections": detections})
+    return predictions
+
+
 def infer_contents(contents: bytes, content_type: str, filename: str, sample_interval: float):
     """Run detailed inference after upload bounds have been enforced."""
     file_type = detect_file_type(content_type, filename)
 
     if file_type == "image":
-        detections = detector.detect(contents)
-        return {"format": file_type, "prediction": detections}
+        return {"format": file_type, "prediction": detector.detect(contents)}
 
-    elif file_type == "video":
+    if file_type == "video":
         frames = extract_video_frames(contents, sample_interval)
-        results = []
-        for frame_bytes, timestamp in frames:
-            detections = detector.detect(frame_bytes)
-            if detections:
-                results.append({"timestamp": round(timestamp, 2), "detections": detections})
-        return {"format": file_type, "frames_checked": len(frames), "predictions": results}
+        timed = [(frame, round(timestamp, 2)) for frame, timestamp in frames]
+        return {"format": file_type, "frames_checked": len(frames), "predictions": detect_items(timed, "timestamp")}
 
-    elif file_type == "pdf":
-        results = []
+    if file_type == "pdf":
         with render_pdf_pages(contents) as (total_pages, pages):
-            for img_bytes, page_num in pages:
-                detections = detector.detect(img_bytes)
-                if detections:
-                    results.append({"page": page_num, "detections": detections})
-        return {"format": file_type, "pages_checked": total_pages, "predictions": results}
+            return {"format": file_type, "pages_checked": total_pages, "predictions": detect_items(pages, "page")}
 
-    elif file_type == "docx":
-        images = extract_docx_images(contents)
-        results = []
-        for img_bytes, img_name in images:
-            detections = detector.detect(img_bytes)
-            if detections:
-                results.append({"image": img_name, "detections": detections})
-        return {"format": file_type, "images_checked": len(images), "predictions": results}
+    if file_type in ("docx", "pptx"):
+        images = extract_document_images(file_type, contents)
+        location_key = "image" if file_type == "docx" else "location"
+        return {"format": file_type, "images_checked": len(images), "predictions": detect_items(images, location_key)}
 
-    elif file_type == "pptx":
-        images = extract_pptx_images(contents)
-        results = []
-        for img_bytes, location in images:
-            detections = detector.detect(img_bytes)
-            if detections:
-                results.append({"location": location, "detections": detections})
-        return {"format": file_type, "images_checked": len(images), "predictions": results}
-
-    else:
-        return {"error": f"Unsupported file type: {content_type}", "filename": filename}
+    return {"error": f"Unsupported file type: {content_type}", "filename": filename}
 
 
 @app.post("/infer")
@@ -372,6 +363,49 @@ async def infer(
 ):
     """Detect nudity in an uploaded file (image, video, PDF, DOCX, PPTX)."""
     return await process_upload(file, infer_contents, file.content_type or "", file.filename or "", sample_interval)
+
+
+def classify_items(
+    file_type: str,
+    items: Iterable[tuple[bytes, object]],
+    total: int,
+    unit: str,
+    threshold: float,
+    early_exit: bool,
+) -> dict:
+    """Classify a video's frames, a PDF's pages or a document's images, in order.
+
+    The upload is unsafe if any item is. With early_exit, nothing after the
+    first unsafe item is classified; items is consumed lazily, so a PDF does
+    not even render the remaining pages.
+    """
+    checked = 0
+    detected_classes: list[str] = []
+    confidence = 0.0
+    first_unsafe_at = None
+
+    for image_bytes, location in items:
+        checked += 1
+        result = classify_image(image_bytes, threshold)
+        if not result["unsafe"]:
+            continue
+        detected_classes.extend(result["detected_classes"])
+        confidence = max(confidence, result["confidence"])
+        if first_unsafe_at is None:
+            first_unsafe_at = location
+        if early_exit:
+            break
+
+    return {
+        "format": file_type,
+        "unsafe": bool(detected_classes),
+        "confidence": confidence,
+        # Each class once, in the order the items first showed it.
+        "detected_classes": list(dict.fromkeys(detected_classes)),
+        f"{unit}_checked": checked,
+        f"total_{unit}": total,
+        "first_unsafe_at": first_unsafe_at,
+    }
 
 
 def classify_contents(
@@ -394,99 +428,20 @@ def classify_contents(
             "detected_classes": result["detected_classes"],
         }
 
-    elif file_type == "video":
+    if file_type == "video":
         frames = extract_video_frames(contents, sample_interval)
-        all_detected_classes = []
-        max_confidence = 0.0
-        first_unsafe_at = None
-        frames_checked = 0
+        timed = [(frame, round(timestamp, 2)) for frame, timestamp in frames]
+        return classify_items(file_type, timed, len(frames), "frames", threshold, early_exit)
 
-        for frame_bytes, timestamp in frames:
-            frames_checked += 1
-            result = classify_image(frame_bytes, threshold)
-
-            if result["unsafe"]:
-                all_detected_classes.extend(result["detected_classes"])
-                max_confidence = max(max_confidence, result["confidence"])
-                if first_unsafe_at is None:
-                    first_unsafe_at = timestamp
-                if early_exit:
-                    break
-
-        return {
-            "format": file_type,
-            "unsafe": len(all_detected_classes) > 0,
-            "confidence": max_confidence,
-            "detected_classes": list(set(all_detected_classes)),
-            "frames_checked": frames_checked,
-            "total_frames": len(frames),
-            "first_unsafe_at": round(first_unsafe_at, 2) if first_unsafe_at is not None else None,
-        }
-
-    elif file_type == "pdf":
-        all_detected_classes = []
-        max_confidence = 0.0
-        first_unsafe_at = None
-        pages_checked = 0
-
+    if file_type == "pdf":
         with render_pdf_pages(contents) as (total_pages, pages):
-            for img_bytes, page_num in pages:
-                pages_checked += 1
-                result = classify_image(img_bytes, threshold)
+            return classify_items(file_type, pages, total_pages, "pages", threshold, early_exit)
 
-                if result["unsafe"]:
-                    all_detected_classes.extend(result["detected_classes"])
-                    max_confidence = max(max_confidence, result["confidence"])
-                    if first_unsafe_at is None:
-                        first_unsafe_at = page_num
-                    if early_exit:
-                        break
+    if file_type in ("docx", "pptx"):
+        images = extract_document_images(file_type, contents)
+        return classify_items(file_type, images, len(images), "images", threshold, early_exit)
 
-        return {
-            "format": file_type,
-            "unsafe": len(all_detected_classes) > 0,
-            "confidence": max_confidence,
-            "detected_classes": list(set(all_detected_classes)),
-            "pages_checked": pages_checked,
-            "total_pages": total_pages,
-            "first_unsafe_at": first_unsafe_at,
-        }
-
-    elif file_type in ("docx", "pptx"):
-        if file_type == "docx":
-            images = extract_docx_images(contents)
-        else:
-            images = extract_pptx_images(contents)
-
-        all_detected_classes = []
-        max_confidence = 0.0
-        first_unsafe_at = None
-        images_checked = 0
-
-        for img_bytes, location in images:
-            images_checked += 1
-            result = classify_image(img_bytes, threshold)
-
-            if result["unsafe"]:
-                all_detected_classes.extend(result["detected_classes"])
-                max_confidence = max(max_confidence, result["confidence"])
-                if first_unsafe_at is None:
-                    first_unsafe_at = location
-                if early_exit:
-                    break
-
-        return {
-            "format": file_type,
-            "unsafe": len(all_detected_classes) > 0,
-            "confidence": max_confidence,
-            "detected_classes": list(set(all_detected_classes)),
-            "images_checked": images_checked,
-            "total_images": len(images),
-            "first_unsafe_at": first_unsafe_at,
-        }
-
-    else:
-        return {"error": f"Unsupported file type: {content_type}", "filename": filename}
+    return {"error": f"Unsupported file type: {content_type}", "filename": filename}
 
 
 @app.post("/classify")
