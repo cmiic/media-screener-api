@@ -83,6 +83,17 @@ jobs:
           }
           sbom "$IMAGE_NAME"
 
+      - name: Write corresponding-source note
+        env:
+          TAG: ${{ steps.release_tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/corresponding-source.md" <<EOF
+          ## Corresponding source
+
+          The \`${IMAGE_NAME}:${TAG}\` image contains Debian packages, some licensed under the GPL, LGPL or AGPL. The attached SPDX SBOM lists every package at its exact version. For a Debian package, the \`upstream\` qualifier of its package URL names the source package, with the source version where it differs; without the qualifier, the source package has the package's own name and version. Debian's Corresponding Source for each, including Debian's packaging changes, is available from [Debian Snapshot](https://snapshot.debian.org/) at \`https://snapshot.debian.org/package/<source>/<version>/\`.
+          EOF
+
       - name: Create GitHub release
         env:
           TAG: ${{ steps.release_tag.outputs.tag }}
@@ -94,7 +105,23 @@ jobs:
             exit 0
           fi
 
-          gh release create "$TAG" --generate-notes
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$TAG" > "$RUNNER_TEMP/generated-release.json"
+          jq -r '.body // ""' "$RUNNER_TEMP/generated-release.json" \
+            > "$RUNNER_TEMP/release-notes.md"
+          printf '\n\n' >> "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/corresponding-source.md" \
+            >> "$RUNNER_TEMP/release-notes.md"
+
+          release_name="$(jq -r '.name // empty' "$RUNNER_TEMP/generated-release.json")"
+          if [[ -z "$release_name" ]]; then
+            release_name="$TAG"
+          fi
+
+          gh release create "$TAG" \
+            --title "$release_name" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
 
       # A step of its own, so the SBOMs are attached even when the release
       # already existed and the step above stopped early.
