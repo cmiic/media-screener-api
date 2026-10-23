@@ -28,22 +28,19 @@ jobs:
         run: uv lock --check
 
       - name: Run ruff
-        run: uv run --locked --only-dev ruff check .
+        run: uv run --locked --no-build --only-dev ruff check .
 
       - name: Run unit tests
-        run: uv run --locked --group dev python -m pytest tests
+        run: uv run --locked --no-build --group dev python -m pytest tests
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
-      - name: Install markdownlint
-        run: npm install -g markdownlint-cli2
-
+      # markdownlint-cli2 through its author's action, pinned by commit: CI runs
+      # no npm install, so no unlocked dependency tree and no lifecycle scripts,
+      # and Dependabot keeps the pin current. The action's globs default to the
+      # repository root only, so they repeat the config's; its ignores still apply.
       - name: Run markdownlint
-        run: markdownlint-cli2
+        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+        with:
+          globs: '**/*.md'
 
   test:
     name: Test
@@ -116,6 +113,9 @@ jobs:
 
       - name: Health check
         run: curl -fsS http://localhost:8080/health
+
+      - name: Verify the API runs as non-root
+        run: docker exec media-screener-test sh -c 'test "$(id -u)" -ne 0'
 
       - name: Test inference endpoint
         run: |

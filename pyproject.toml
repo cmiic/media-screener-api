@@ -17,6 +17,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "coverage",
     "pytest",
     "ruff",
 ]
@@ -26,6 +27,14 @@ package = false
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+# The SonarQube Cloud workflow measures the unit tests with coverage.py. Paths
+# in coverage.xml stay relative to the repository root, where
+# sonar-project.properties resolves them; the tests themselves are not source.
+[tool.coverage.run]
+relative_files = true
+source = ["."]
+omit = [".venv/*", "tests/*"]
 
 [tool.ruff]
 target-version = "py314"

@@ -3,6 +3,10 @@
   "build": {
     "dockerfile": "../Dockerfile"
   },
+  // The image runs the service as "screener", a system user without a home
+  // directory. VS Code needs a home for its server and extensions, so the
+  // development container keeps working as root, as file-api's does.
+  "remoteUser": "root",
   "initializeCommand": "./scripts/provision-model.sh models/640m.onnx",
   "mounts": [
     "source=${localWorkspaceFolder}/models/640m.onnx,target=/models/640m.onnx,type=bind,readonly"

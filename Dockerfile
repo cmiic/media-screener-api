@@ -26,8 +26,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user
+RUN groupadd -r screener && useradd -r -g screener screener
+
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev \
+RUN uv sync --locked --no-build --no-dev \
     && find /app/.venv -type f -name '*.onnx' -delete \
     && rm -rf /root/.cache/uv
 
@@ -46,6 +49,11 @@ COPY --chmod=755 scripts/container-entrypoint.sh /app/scripts/container-entrypoi
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
 LABEL org.opencontainers.image.version="${APP_VERSION}"
+
+# Run as non-root user. Everything under /app stays root-owned and read-only to
+# it; the service writes nothing outside /tmp, and the mounted model only has to
+# be world-readable, as provision-model.sh leaves it (0644).
+USER screener
 
 EXPOSE 8080
 
