@@ -13,15 +13,13 @@ Open an [issue](https://github.com/cmiic/media-screener-api/issues/new/choose) u
 ## Development
 
 ```bash
-uv lock --check                                        # the lockfile is up to date
-uv run --locked --only-dev ruff check .                # lint
-uv run --locked --group dev python -m pytest tests     # unit tests
-markdownlint-cli2                                      # docs
+uv lock --check                                                   # the lockfile is up to date
+uv run --locked --no-build --only-dev ruff check .                # lint
+uv run --locked --no-build --group dev python -m pytest tests     # unit tests
+markdownlint-cli2                                                 # docs
 ```
 
-These are exactly the commands CI runs. `--locked` makes `uv` fail rather than
-silently re-resolve the lockfile, so a local run uses the same dependency set
-that CI validates.
+These are exactly the commands CI runs. `--locked` makes `uv` fail rather than silently re-resolve the lockfile, so a local run uses the same dependency set that CI validates. `--no-build` makes it refuse to build a source distribution, which would run that package's own build code: every dependency comes from a locked, hash-checked wheel, and the image build installs them the same way.
 
 ## Making a change
 

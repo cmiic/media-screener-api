@@ -28,10 +28,10 @@ jobs:
         run: uv lock --check
 
       - name: Run ruff
-        run: uv run --locked --only-dev ruff check .
+        run: uv run --locked --no-build --only-dev ruff check .
 
       - name: Run unit tests
-        run: uv run --locked --group dev python -m pytest tests
+        run: uv run --locked --no-build --group dev python -m pytest tests
 
       # markdownlint-cli2 through its author's action, pinned by commit: CI runs
       # no npm install, so no unlocked dependency tree and no lifecycle scripts,

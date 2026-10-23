@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev \
+RUN uv sync --locked --no-build --no-dev \
     && find /app/.venv -type f -name '*.onnx' -delete \
     && rm -rf /root/.cache/uv
 
