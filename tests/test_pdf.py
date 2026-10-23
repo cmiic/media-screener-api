@@ -33,10 +33,10 @@ def test_source_url_targets_revision() -> None:
 
 
 def test_read_upload_rejects_content_beyond_limit() -> None:
-    upload = app.UploadFile(file=io.BytesIO(b"12345"), filename="large.jpg")
+    reading = app.read_upload(app.UploadFile(file=io.BytesIO(b"12345"), filename="large.jpg"))
 
     with patch.object(app, "MAX_UPLOAD_SIZE", 4), pytest.raises(HTTPException) as exc_info:
-        asyncio.run(app.read_upload(upload))
+        asyncio.run(reading)
 
     assert exc_info.value.status_code == 413
 
@@ -76,16 +76,21 @@ def test_render_pdf_pages_renders_each_page_as_png() -> None:
 
 
 def test_render_pdf_pages_rejects_excess_pages() -> None:
+    pdf = create_pdf(2)
+
     with patch.object(app, "MAX_PDF_PAGES", 1), pytest.raises(HTTPException) as exc_info:
-        with app.render_pdf_pages(create_pdf(2)):
+        with app.render_pdf_pages(pdf):
             pass
 
     assert exc_info.value.status_code == 422
 
 
 def test_render_pdf_pages_rejects_excess_rendered_pixels() -> None:
-    with patch.object(app, "MAX_PDF_RENDERED_PIXELS", 1), pytest.raises(HTTPException) as exc_info:
-        with app.render_pdf_pages(create_pdf(1)) as (_, pages):
+    pdf = create_pdf(1)
+
+    # The document opens; the pixel limit stops the first page render.
+    with patch.object(app, "MAX_PDF_RENDERED_PIXELS", 1), app.render_pdf_pages(pdf) as (_, pages):
+        with pytest.raises(HTTPException) as exc_info:
             next(pages)
 
     assert exc_info.value.status_code == 422
@@ -183,8 +188,9 @@ def test_worker_timeout_error_is_not_misclassified_as_deadline() -> None:
 
     async def run_worker_error() -> None:
         slots = asyncio.Semaphore(1)
+        upload = app.UploadFile(file=io.BytesIO(b"image"))
         with patch.object(app, "scan_slots", slots), pytest.raises(TimeoutError, match="parser failure"):
-            await app.process_upload(app.UploadFile(file=io.BytesIO(b"image")), raise_timeout)
+            await app.process_upload(upload, raise_timeout)
         assert not slots.locked()
 
     asyncio.run(run_worker_error())

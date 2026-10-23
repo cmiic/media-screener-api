@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Load environment variables
-if [ -f "$SCRIPT_DIR/.env" ]; then
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
     source "$SCRIPT_DIR/.env"
 fi
 
@@ -20,7 +20,7 @@ if command -v podman &> /dev/null; then
 elif command -v docker &> /dev/null; then
     RUNTIME="docker"
 else
-    echo "Error: No container runtime found. Install podman or docker."
+    echo "Error: No container runtime found. Install podman or docker." >&2
     exit 1
 fi
 
@@ -43,7 +43,7 @@ PROCESSING_TIMEOUT_SECONDS="${PROCESSING_TIMEOUT_SECONDS:-40}"
 MODEL_FILE="${MODEL_FILE:-$PROJECT_DIR/models/640m.onnx}"
 . "$PROJECT_DIR/model.env"
 
-if [ ! -f "$MODEL_FILE" ]; then
+if [[ ! -f "$MODEL_FILE" ]]; then
     echo "Error: Model not found at $MODEL_FILE" >&2
     echo "Run: $PROJECT_DIR/scripts/provision-model.sh \"$MODEL_FILE\"" >&2
     exit 1
