@@ -63,6 +63,10 @@ echo "  Listening on: $HOST_IP:$HOST_PORT"
 echo "  Memory limit: $MEMORY_LIMIT"
 echo "  CPU limit: $CPU_LIMIT"
 
+# /tmp holds each upload while it arrives, with every file part of its request
+# body, and a video again while its frames are read; MAX_CONCURRENT_SCANS
+# uploads at most. Keep it at least MAX_CONCURRENT_SCANS times
+# (2 x MAX_UPLOAD_SIZE + 64 KiB).
 $RUNTIME run -d \
     --restart=always \
     --name "$CONTAINER_NAME" \

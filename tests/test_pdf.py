@@ -14,6 +14,13 @@ with patch.object(nudenet, "NudeDetector", return_value=Mock()):
     import app
 
 
+def request_with_slot() -> Mock:
+    """A request as UploadRoute hands it to an endpoint: with its slot in its state."""
+    request = Mock()
+    request.state.scan_slot = app.ScanSlot(asyncio.Semaphore(0))
+    return request
+
+
 def create_pdf(page_count: int) -> bytes:
     pages = [Image.new("RGB", (24, 16), color=(index * 40, 80, 120)) for index in range(page_count)]
     output = io.BytesIO()
@@ -59,7 +66,7 @@ def test_classify_video_preserves_first_frame_timestamp() -> None:
         patch.object(app, "classify_image", return_value=unsafe_result),
     ):
         response = asyncio.run(
-            app.classify(upload, threshold=0.35, sample_interval=5.0, early_exit=True)
+            app.classify(request_with_slot(), upload, threshold=0.35, sample_interval=5.0, early_exit=True)
         )
 
     assert response["unsafe"] is True
@@ -140,17 +147,24 @@ def test_infer_times_out_without_releasing_running_worker_slot() -> None:
         finished.wait(timeout=1)
 
     async def run_timeout() -> int:
+        slots = asyncio.Semaphore(1)
         with (
+            patch.object(app, "scan_slots", slots),
             patch.object(app, "PROCESSING_TIMEOUT_SECONDS", 0.001),
             patch.object(app, "infer_contents", side_effect=blocking_infer),
             pytest.raises(HTTPException) as exc_info,
         ):
-            await app.infer(upload, sample_interval=5.0)
+            request = Mock()
+            request.state.scan_slot = await app.acquire_scan_slot()
+            try:
+                await app.infer(request, upload, sample_interval=5.0)
+            finally:
+                request.state.scan_slot.release()
         assert await asyncio.to_thread(started.wait, 1)
-        assert app.scan_slots.locked()
+        assert slots.locked()
         finished.set()
-        await asyncio.wait_for(app.scan_slots.acquire(), timeout=1)
-        app.scan_slots.release()
+        await asyncio.wait_for(slots.acquire(), timeout=1)
+        slots.release()
         return exc_info.value.status_code
 
     assert asyncio.run(run_timeout()) == 504
@@ -167,12 +181,15 @@ def test_cancelled_media_request_holds_worker_slot_until_work_stops() -> None:
     async def run_cancel() -> None:
         slots = asyncio.Semaphore(1)
         with patch.object(app, "scan_slots", slots):
-            task = asyncio.create_task(app.process_upload(app.UploadFile(file=io.BytesIO(b"image")), blocking_infer))
+            slot = await app.acquire_scan_slot()
+            upload = app.UploadFile(file=io.BytesIO(b"image"))
+            task = asyncio.create_task(app.process_upload(upload, slot, blocking_infer))
             while not started.is_set():
                 await asyncio.sleep(0)
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
+            slot.release()
             assert slots.locked()
             finished.set()
             await asyncio.wait_for(slots.acquire(), timeout=1)
@@ -190,7 +207,11 @@ def test_worker_timeout_error_is_not_misclassified_as_deadline() -> None:
         slots = asyncio.Semaphore(1)
         upload = app.UploadFile(file=io.BytesIO(b"image"))
         with patch.object(app, "scan_slots", slots), pytest.raises(TimeoutError, match="parser failure"):
-            await app.process_upload(upload, raise_timeout)
+            slot = await app.acquire_scan_slot()
+            try:
+                await app.process_upload(upload, slot, raise_timeout)
+            finally:
+                slot.release()
         assert not slots.locked()
 
     asyncio.run(run_worker_error())
@@ -231,7 +252,7 @@ def test_classify_pdf_early_exit_stops_rendering() -> None:
         patch.object(app, "classify_image", return_value=unsafe_result),
     ):
         response = asyncio.run(
-            app.classify(upload, threshold=0.35, sample_interval=5.0, early_exit=True)
+            app.classify(request_with_slot(), upload, threshold=0.35, sample_interval=5.0, early_exit=True)
         )
 
     assert response["pages_checked"] == 1
