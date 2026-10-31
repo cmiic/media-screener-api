@@ -11,10 +11,12 @@ from typing import Annotated
 import cv2
 import pypdfium2 as pdfium
 from docx import Document
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi.routing import APIRoute
 from nudenet import NudeDetector
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from starlette.types import Message, Receive
 
 SOURCE_REPOSITORY = "https://github.com/cmiic/media-screener-api"
 
@@ -68,6 +70,11 @@ SCAN_QUEUE_TIMEOUT_SECONDS = float(os.environ.get("SCAN_QUEUE_TIMEOUT_SECONDS", 
 UPLOAD_TIMEOUT_SECONDS = float(os.environ.get("UPLOAD_TIMEOUT_SECONDS", "10"))
 PROCESSING_TIMEOUT_SECONDS = float(os.environ.get("PROCESSING_TIMEOUT_SECONDS", "40"))
 
+# The multipart framing around the file: the boundaries, the part headers and
+# room for a small form field. A request body larger than MAX_UPLOAD_SIZE plus
+# this is refused without parsing it; read_upload still checks the file itself.
+MULTIPART_OVERHEAD = 64 * 1024
+
 # The error responses of /infer and /classify, as the OpenAPI schema lists
 # them. The 4xx and the 504 carry their message in "detail". 422 stays
 # FastAPI's own, for invalid parameters: a file over a media limit answers 422
@@ -75,7 +82,7 @@ PROCESSING_TIMEOUT_SECONDS = float(os.environ.get("PROCESSING_TIMEOUT_SECONDS", 
 # replace FastAPI's validation error schema rather than add to it.
 PROCESSING_ERRORS = {
     408: {"description": "The upload did not arrive within UPLOAD_TIMEOUT_SECONDS"},
-    413: {"description": "The file exceeds MAX_UPLOAD_SIZE"},
+    413: {"description": "The file, or the request body carrying it, exceeds MAX_UPLOAD_SIZE"},
     500: {"description": "The file could not be processed, for example because it cannot be decoded"},
     503: {"description": "No processing slot freed up within SCAN_QUEUE_TIMEOUT_SECONDS"},
     504: {"description": "Processing did not finish within PROCESSING_TIMEOUT_SECONDS"},
@@ -106,14 +113,18 @@ async def source() -> dict[str, str]:
     return {"license": "AGPL-3.0-or-later", "source": SOURCE_URL}
 
 
+def upload_too_large() -> HTTPException:
+    return HTTPException(status_code=413, detail=f"File exceeds the {MAX_UPLOAD_SIZE}-byte upload limit")
+
+
 async def read_upload(file: UploadFile) -> bytes:
     """Read an upload without allowing the application buffer to exceed its limit."""
     if file.size is not None and file.size > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=413, detail=f"File exceeds the {MAX_UPLOAD_SIZE}-byte upload limit")
+        raise upload_too_large()
 
     contents = await file.read(MAX_UPLOAD_SIZE + 1)
     if len(contents) > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=413, detail=f"File exceeds the {MAX_UPLOAD_SIZE}-byte upload limit")
+        raise upload_too_large()
     return contents
 
 
@@ -124,37 +135,117 @@ def release_scan_slot(worker: asyncio.Task, slots: asyncio.Semaphore) -> None:
     slots.release()
 
 
-async def process_upload(file: UploadFile, operation, *args):
-    """Read and process one upload within queue, time, and concurrency bounds."""
+class ScanSlot:
+    """A processing slot, held by one upload request from before its body arrives to the end of its worker."""
+
+    def __init__(self, slots: asyncio.Semaphore) -> None:
+        self.slots = slots
+        self.worker: asyncio.Task | None = None
+
+    def keep_until_done(self, worker: asyncio.Task) -> None:
+        """Hold the slot past the end of the request, until worker code that outlived it has stopped."""
+        self.worker = worker
+
+    def release(self) -> None:
+        if self.worker is None:
+            self.slots.release()
+        else:
+            slots = self.slots
+            self.worker.add_done_callback(lambda completed: release_scan_slot(completed, slots))
+
+
+async def acquire_scan_slot() -> ScanSlot:
+    """Wait up to SCAN_QUEUE_TIMEOUT_SECONDS for a free processing slot."""
     slots = scan_slots
     try:
         await asyncio.wait_for(slots.acquire(), timeout=SCAN_QUEUE_TIMEOUT_SECONDS)
     except TimeoutError as exc:
         raise HTTPException(status_code=503, detail="Scanner is at capacity; retry later") from exc
+    return ScanSlot(slots)
 
-    release_slot = True
-    try:
+
+def limit_body(receive: Receive, limit: int) -> Receive:
+    """Pass a request body through, refusing it past `limit` bytes or once UPLOAD_TIMEOUT_SECONDS have passed."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + UPLOAD_TIMEOUT_SECONDS
+    received = 0
+    complete = False
+
+    async def limited_receive() -> Message:
+        nonlocal received, complete
+        if complete:
+            return await receive()
         try:
-            contents = await asyncio.wait_for(read_upload(file), timeout=UPLOAD_TIMEOUT_SECONDS)
+            async with asyncio.timeout_at(deadline):
+                message = await receive()
         except TimeoutError as exc:
             raise HTTPException(status_code=408, detail="Upload timed out") from exc
+        # A chunk the server had already buffered comes back without a
+        # suspension, and an expired timeout only cancels at the next one: the
+        # deadline is checked here as well, or a client that keeps the buffer
+        # full would never meet it.
+        if loop.time() >= deadline:
+            raise HTTPException(status_code=408, detail="Upload timed out")
+        if message["type"] == "http.request":
+            # Counted as it arrives: a chunked body declares no length, and a
+            # declared one is not a promise.
+            received += len(message.get("body", b""))
+            if received > limit:
+                raise upload_too_large()
+            complete = not message.get("more_body", False)
+        return message
 
-        worker = asyncio.create_task(asyncio.to_thread(operation, contents, *args))
-        try:
-            return await asyncio.wait_for(asyncio.shield(worker), timeout=PROCESSING_TIMEOUT_SECONDS)
-        except TimeoutError as exc:
-            if worker.done():
-                raise
-            release_slot = False
-            worker.add_done_callback(lambda completed: release_scan_slot(completed, slots))
-            raise HTTPException(status_code=504, detail="Media processing timed out") from exc
-        except asyncio.CancelledError:
-            release_slot = False
-            worker.add_done_callback(lambda completed: release_scan_slot(completed, slots))
+    return limited_receive
+
+
+class UploadRoute(APIRoute):
+    """The route of an upload endpoint, which bounds the request body before FastAPI parses it.
+
+    FastAPI reads the whole multipart body, spooling the file to /tmp, before
+    the endpoint runs; limits applied in the endpoint would come after the
+    upload had already taken its memory, disk and time. Here the request takes
+    a processing slot before any of its body is read, so at most
+    MAX_CONCURRENT_SCANS uploads are received or processed at a time, and the
+    body has to stay within MAX_UPLOAD_SIZE and arrive within
+    UPLOAD_TIMEOUT_SECONDS. The endpoint finds the slot in
+    request.state.scan_slot.
+    """
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def limited_handler(request: Request) -> Response:
+            limit = MAX_UPLOAD_SIZE + MULTIPART_OVERHEAD
+            declared = request.headers.get("content-length", "")
+            if declared.isdigit() and int(declared) > limit:
+                raise upload_too_large()
+
+            slot = await acquire_scan_slot()
+            try:
+                limited = Request(request.scope, limit_body(request.receive, limit))
+                limited.state.scan_slot = slot
+                return await handler(limited)
+            finally:
+                slot.release()
+
+        return limited_handler
+
+
+async def process_upload(file: UploadFile, slot: ScanSlot, operation, *args):
+    """Read and process one upload in the slot its request holds, within the processing time bound."""
+    contents = await read_upload(file)
+
+    worker = asyncio.create_task(asyncio.to_thread(operation, contents, *args))
+    try:
+        return await asyncio.wait_for(asyncio.shield(worker), timeout=PROCESSING_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
+        if worker.done():
             raise
-    finally:
-        if release_slot:
-            slots.release()
+        slot.keep_until_done(worker)
+        raise HTTPException(status_code=504, detail="Media processing timed out") from exc
+    except asyncio.CancelledError:
+        slot.keep_until_done(worker)
+        raise
 
 
 def detect_file_type(content_type: str, filename: str) -> str:
@@ -370,8 +461,13 @@ def infer_contents(contents: bytes, content_type: str, filename: str, sample_int
     return {"error": f"Unsupported file type: {content_type}", "filename": filename}
 
 
-@app.post("/infer", responses=PROCESSING_ERRORS)
+# The upload endpoints, on routes that bound the request body; see UploadRoute.
+uploads = APIRouter(route_class=UploadRoute)
+
+
+@uploads.post("/infer", responses=PROCESSING_ERRORS)
 async def infer(
+    request: Request,
     file: Annotated[UploadFile, File()],
     sample_interval: Annotated[float, Query(ge=0.1, le=60, description="Seconds between video frame samples")] = 5.0,
 ):
@@ -380,7 +476,14 @@ async def infer(
     A file over a media limit (PDF pages or rendered pixels, video duration or
     sampled frames, document images) is rejected with 422.
     """
-    return await process_upload(file, infer_contents, file.content_type or "", file.filename or "", sample_interval)
+    return await process_upload(
+        file,
+        request.state.scan_slot,
+        infer_contents,
+        file.content_type or "",
+        file.filename or "",
+        sample_interval,
+    )
 
 
 def classify_items(
@@ -462,8 +565,9 @@ def classify_contents(
     return {"error": f"Unsupported file type: {content_type}", "filename": filename}
 
 
-@app.post("/classify", responses=PROCESSING_ERRORS)
+@uploads.post("/classify", responses=PROCESSING_ERRORS)
 async def classify(
+    request: Request,
     file: Annotated[UploadFile, File()],
     threshold: Annotated[float, Query(ge=0, le=1, description="Minimum confidence for unsafe detection")] = 0.35,
     sample_interval: Annotated[float, Query(ge=0.1, le=60, description="Seconds between video frame samples")] = 5.0,
@@ -476,6 +580,7 @@ async def classify(
     """
     return await process_upload(
         file,
+        request.state.scan_slot,
         classify_contents,
         file.content_type or "",
         file.filename or "",
@@ -484,3 +589,5 @@ async def classify(
         early_exit,
     )
 
+
+app.include_router(uploads)

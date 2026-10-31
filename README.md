@@ -102,15 +102,15 @@ All settings are in `deploy/.env`:
 | `MEMORY_LIMIT` | 2g | Container memory limit |
 | `CPU_LIMIT` | 2 | Container CPU limit |
 | `MODEL_FILE` | `models/640m.onnx` | Host path to the provisioned model |
-| `MAX_UPLOAD_SIZE` | 209715200 | Maximum buffered upload bytes |
+| `MAX_UPLOAD_SIZE` | 209715200 | Maximum upload size in bytes; a request body larger than this plus 64 KiB of multipart framing is refused, before it is read if its `Content-Length` says so, otherwise as it arrives |
 | `MAX_PDF_PAGES` | 100 | Maximum PDF pages |
 | `MAX_PDF_RENDERED_PIXELS` | 100000000 | Maximum cumulative PDF render pixels |
 | `MAX_VIDEO_DURATION_SECONDS` | 600 | Maximum video duration |
 | `MAX_VIDEO_SAMPLED_FRAMES` | 120 | Maximum sampled video frames |
 | `MAX_DOCUMENT_IMAGES` | 100 | Maximum DOCX/PPTX images |
-| `MAX_CONCURRENT_SCANS` | 1 | Maximum active parser/inference workers |
-| `SCAN_QUEUE_TIMEOUT_SECONDS` | 5 | Maximum wait for a worker slot |
-| `UPLOAD_TIMEOUT_SECONDS` | 10 | Maximum upload read duration |
+| `MAX_CONCURRENT_SCANS` | 1 | Maximum uploads being received or processed at a time |
+| `SCAN_QUEUE_TIMEOUT_SECONDS` | 5 | Maximum wait for a processing slot, which an upload takes before its body is read |
+| `UPLOAD_TIMEOUT_SECONDS` | 10 | Maximum time for the request body to arrive |
 | `PROCESSING_TIMEOUT_SECONDS` | 40 | Maximum parser/inference response wait |
 
 ---
